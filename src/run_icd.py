@@ -189,6 +189,8 @@ def parse_args():
 
 
 def main():
+    assert torch.cuda.is_available(), "No GPU available!"
+
     args = parse_args()
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -265,7 +267,8 @@ def main():
     elif args.model_type in ["bert", "roberta"]:
         config.model_mode = args.model_mode
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
+        "roberta-base",
+        # args.model_name_or_path,
         use_fast=not args.use_slow_tokenizer,
         do_lower_case=not args.cased)
     model_class = MODELS_CLASSES[args.model_type]
@@ -281,7 +284,7 @@ def main():
             config=config,
         )
 
-    sentence1_key, sentence2_key = "text", None
+    sentence1_key, sentence2_key = "TEXT", None
 
     label_to_id = {v: i for i, v in enumerate(label_list)}
 
@@ -293,9 +296,10 @@ def main():
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
         result = tokenizer(*texts, padding=padding, max_length=args.max_length, truncation=True, add_special_tokens="cls" not in args.model_mode)
-        if "label" in examples:
-            result["labels"] = examples["label"]
-            result["label_ids"] = [[label_to_id[label.strip()] for label in labels.strip().split(';') if label.strip() != ""] if labels is not None else [] for labels in examples["label"]]
+
+        if "LABELS" in examples:
+            result["labels"] = examples["LABELS"]
+            result["label_ids"] = [[label_to_id[label.strip()] for label in labels.strip().split(';') if label.strip() != ""] if labels is not None else [] for labels in examples["LABELS"]]
         return result
 
     remove_columns = raw_datasets["train"].column_names if args.train_file is not None else raw_datasets["validation"].column_names
