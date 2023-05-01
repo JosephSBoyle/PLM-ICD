@@ -19,8 +19,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss
-
-from transformers import BertPreTrainedModel, BertModel
+from transformers import BertModel, BertPreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput
 
 

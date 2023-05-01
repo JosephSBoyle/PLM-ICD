@@ -23,9 +23,10 @@ import torch
 import transformers
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from datasets import load_dataset, load_metric
+from torch.optim import AdamW
 from torch.utils.data.dataloader import DataLoader
 from tqdm.auto import tqdm
-from transformers import (AdamW, AutoConfig, AutoTokenizer, BatchEncoding,
+from transformers import (AutoConfig, AutoTokenizer, BatchEncoding,
                           get_scheduler, set_seed)
 
 from argparser import parse_args
@@ -176,6 +177,7 @@ def main():
                                            add_special_tokens=("cls" not in args.model_mode))
 
         if "LABELS" in examples:
+            ### XXX HACK ###
             ALLOWED_LABELS = ("250.01", "250.02")
             result["labels"] = examples["LABELS"]
 
@@ -193,7 +195,7 @@ def main():
                                 sample_labels.append(label_to_id[stripped_label])
                             #####
                     if len(sample_labels) == 2:
-                        breakpoint() # these codes should be mutually exclusive!
+                        breakpoint() # these diabetes codes should be mutually exclusive!
                     label_ids.append(sample_labels)
             ##########################
         

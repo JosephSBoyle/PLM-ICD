@@ -14,18 +14,13 @@
 # limitations under the License.
 """PyTorch Longformer model. """
 
-import math
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn import functional as F
-
+from torch.nn import BCEWithLogitsLoss
 from transformers import LongformerModel
-from transformers.models.longformer.modeling_longformer import LongformerSequenceClassifierOutput, LongformerPreTrainedModel
+from transformers.models.longformer.modeling_longformer import (
+    LongformerPreTrainedModel, LongformerSequenceClassifierOutput)
 
 
 class LongformerForMultilabelClassification(LongformerPreTrainedModel):

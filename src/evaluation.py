@@ -2,17 +2,16 @@
     This file contains evaluation methods that take in a set of predicted labels 
         and a set of ground truth labels and calculate precision, recall, accuracy, f1, and metrics @k
 """
-from collections import defaultdict
 import csv
 import json
-import numpy as np
 import os
 import sys
-
-from sklearn.metrics import roc_curve, auc
-from tqdm import tqdm
+from collections import defaultdict
 
 import datasets
+import numpy as np
+from sklearn.metrics import auc, roc_curve
+from tqdm import tqdm
 
 MIMIC_3_DIR = "../data/mimic3/"
 MIMIC_2_DIR = "../data/mimic2/"
