@@ -31,9 +31,7 @@ from accelerate import Accelerator, DistributedDataParallelKwargs
 from transformers import (
     AdamW,
     AutoConfig,
-    AutoModelForSequenceClassification,
     AutoTokenizer,
-    SchedulerType,
     get_scheduler,
     set_seed,
     BatchEncoding

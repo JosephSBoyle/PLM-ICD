@@ -15,14 +15,6 @@
 # limitations under the License.
 """PyTorch BERT model. """
 
-
-import math
-import os
-import warnings
-import logging
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
 import torch
 import torch.utils.checkpoint
 from torch import nn
