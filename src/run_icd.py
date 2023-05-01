@@ -36,10 +36,12 @@ from transformers import (
     SchedulerType,
     get_scheduler,
     set_seed,
+    BatchEncoding
 )
 from modeling_bert import BertForMultilabelClassification
 from modeling_roberta import RobertaForMultilabelClassification
 from modeling_longformer import LongformerForMultilabelClassification
+from modelling_caml import ConvolutionalAttentionPool
 from evaluation import all_metrics
 
 
@@ -49,7 +51,8 @@ logger = logging.getLogger(__name__)
 MODELS_CLASSES = {
     'bert': BertForMultilabelClassification,
     'roberta': RobertaForMultilabelClassification,
-    'longformer': LongformerForMultilabelClassification
+    'longformer': LongformerForMultilabelClassification,
+    'caml': ConvolutionalAttentionPool,
 }
 
 
@@ -103,7 +106,7 @@ def parse_args():
         type=str,
         help="The type of model",
         required=True,
-        choices=["bert", "roberta", "longformer"]
+        choices=["bert", "roberta", "longformer", "caml"]
     )
     parser.add_argument(
         "--model_mode",
@@ -261,7 +264,10 @@ def main():
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+    try:
+        config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+    except AttributeError: # CAML model has no 'from_pretrained' attr
+        config = AutoConfig.from_pretrained("roberta-base", num_labels=num_labels, finetuning_task=args.task_name)
     if args.model_type == "longformer":
         config.attention_window = args.chunk_size
     elif args.model_type in ["bert", "roberta"]:
@@ -273,20 +279,37 @@ def main():
         do_lower_case=not args.cased)
     model_class = MODELS_CLASSES[args.model_type]
     if args.num_train_epochs > 0:
-        model = model_class.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-        )
+        if hasattr(model_class, "from_pretrained"):
+            model = model_class.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+            )
+        else:
+            # CAML model isn't a pretrained model.
+            model = model_class(config=config)
     else:
-        model = model_class.from_pretrained(
-            args.output_dir,
-            config=config,
-        )
+        if hasattr(model_class, "from_pretrained"):
+            model = model_class.from_pretrained(
+                args.output_dir,
+                config=config,
+            )
+        else:
+            # CAML model isn't a pretrained model.
+            model = model_class(config=config)
 
     sentence1_key, sentence2_key = "TEXT", None
 
-    label_to_id = {v: i for i, v in enumerate(label_list)}
+    label_to_id: dict[str, int] = {v: i for i, v in enumerate(label_list)}
+    """A map of ICD-9 diagnostic codes to positional label indices.
+    
+    Example:
+        Diabetes mellitus without mention of complications.
+        { "250.00" : 8515 } 
+        Label indexed at 8515.
+        e.g if x[8515] == 1:
+            'diagnosed with diabetes'
+    """
 
     padding = False
 
@@ -295,11 +318,32 @@ def main():
         texts = (
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
-        result = tokenizer(*texts, padding=padding, max_length=args.max_length, truncation=True, add_special_tokens="cls" not in args.model_mode)
+        result: BatchEncoding = tokenizer(*texts, padding=padding, max_length=args.max_length, truncation=True,
+                                           add_special_tokens=("cls" not in args.model_mode))
 
         if "LABELS" in examples:
+            ALLOWED_LABELS = ("250.01", "250.02")
             result["labels"] = examples["LABELS"]
-            result["label_ids"] = [[label_to_id[label.strip()] for label in labels.strip().split(';') if label.strip() != ""] if labels is not None else [] for labels in examples["LABELS"]]
+
+            ### Extract the labels ###
+            label_ids: list[int] = []
+            for labels in examples["LABELS"]:
+                if labels is None:
+                    label_ids.append([]) # Sample has no labels!
+                else:
+                    sample_labels = []
+                    for label in labels.strip().split(';'):
+                        if (stripped_label := label.strip()) != "":
+                            ##### FILTER TO THE ALLOWED LABELS
+                            if stripped_label in ALLOWED_LABELS:
+                                sample_labels.append(label_to_id[stripped_label])
+                            #####
+                    if len(sample_labels) == 2:
+                        breakpoint() # these codes should be mutually exclusive!
+                    label_ids.append(sample_labels)
+            ##########################
+        
+            result["label_ids"] = label_ids
         return result
 
     remove_columns = raw_datasets["train"].column_names if args.train_file is not None else raw_datasets["validation"].column_names
@@ -485,7 +529,10 @@ def main():
     if args.output_dir is not None and args.num_train_epochs > 0:
         accelerator.wait_for_everyone()
         unwrapped_model = accelerator.unwrap_model(model)
-        unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
+        if hasattr(unwrapped_model, "save_pretrained"):
+            unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
+        else:
+            print("NotImplemented for the CAML model.")
 
 
 if __name__ == "__main__":
