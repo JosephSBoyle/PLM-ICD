@@ -28,6 +28,7 @@ from torch.utils.data.dataloader import DataLoader
 from tqdm.auto import tqdm
 from transformers import (AutoConfig, AutoTokenizer, BatchEncoding,
                           get_scheduler, set_seed)
+from transformers.modeling_outputs import SequenceClassifierOutput
 
 from argparser import parse_args
 from evaluation import all_metrics
@@ -40,11 +41,13 @@ logger = logging.getLogger(__name__)
 
 
 MODELS_CLASSES = {
-    'bert': BertForMultilabelClassification,
-    'roberta': RobertaForMultilabelClassification,
+    'bert':       BertForMultilabelClassification,
+    'roberta':    RobertaForMultilabelClassification,
     'longformer': LongformerForMultilabelClassification,
-    'caml': ConvolutionalAttentionPool,
+    'caml':       ConvolutionalAttentionPool,
 }
+
+CAML_MODEL_PATH = "../models/caml_base/model_weights.pth"
 
 def main():
     assert torch.cuda.is_available(), "No GPU available!"
@@ -97,22 +100,26 @@ def main():
         data_files["validation"] = args.validation_file
     extension = (args.train_file if args.train_file is not None else args.validation_file).split(".")[-1]
     raw_datasets = load_dataset(extension, data_files=data_files)
-    # See more about loading any type of standard or custom dataset at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
-
+    
+    ### XXX Add this back to load all labels
     # Labels
     # A useful fast method:
     # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
-    labels = set()
-    all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
-    if args.code_file is not None:
-        all_codes_file = args.code_file
+    # labels = set()
 
-    with open(all_codes_file, "r") as f:
-        for line in f:
-            if line.strip() != "":
-                labels.add(line.strip())
-    label_list = sorted(list(labels))
+    # all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
+    # if args.code_file is not None:
+    #     all_codes_file = args.code_file
+
+    # with open(all_codes_file, "r") as f:
+    #     for line in f:
+    #         if line.strip() != "":
+    #             labels.add(line.strip())
+    # label_list = sorted(labels)
+    ###
+
+    label_list = ["250.01", "250.02"] # Diabetes types I and II, respectively.
+
     num_labels = len(label_list)
 
     # Load pretrained model and tokenizer
@@ -142,7 +149,19 @@ def main():
             )
         else:
             # CAML model isn't a pretrained model.
-            model = model_class(config=config)
+            model: torch.nn.Module = model_class(config=config)
+            
+            ### XXX IF WE'RE LOADING AND FREEZING THE WEIGHTS
+            x = torch.load(CAML_MODEL_PATH)
+            conditioning_weight = torch.Tensor([[1., 0.], # Identity matrix
+                                                [0., 1.]])
+            x["_conditioning.weight"] = conditioning_weight
+            x["_conditioning.bias"]   = torch.zeros([2])
+            model.load_state_dict(x)
+            
+            for name, param in model.named_parameters():
+                param.requires_grad = bool("_conditioning" in name)
+            ###
     else:
         if hasattr(model_class, "from_pretrained"):
             model = model_class.from_pretrained(
@@ -165,7 +184,6 @@ def main():
         e.g if x[8515] == 1:
             'diagnosed with diabetes'
     """
-
     padding = False
 
     def preprocess_function(examples):
@@ -177,8 +195,6 @@ def main():
                                            add_special_tokens=("cls" not in args.model_mode))
 
         if "LABELS" in examples:
-            ### XXX HACK ###
-            ALLOWED_LABELS = ("250.01", "250.02")
             result["labels"] = examples["LABELS"]
 
             ### Extract the labels ###
@@ -190,8 +206,8 @@ def main():
                     sample_labels = []
                     for label in labels.strip().split(';'):
                         if (stripped_label := label.strip()) != "":
-                            ##### FILTER TO THE ALLOWED LABELS
-                            if stripped_label in ALLOWED_LABELS:
+                            # XXX This line is necessary if we're looking at a subset of labels!
+                            if stripped_label in label_list:
                                 sample_labels.append(label_to_id[stripped_label])
                             #####
                     if len(sample_labels) == 2:
@@ -203,9 +219,36 @@ def main():
         return result
 
     remove_columns = raw_datasets["train"].column_names if args.train_file is not None else raw_datasets["validation"].column_names
-    processed_datasets = raw_datasets.map(
-        preprocess_function, batched=True, remove_columns=remove_columns
-    )
+    processed_datasets = raw_datasets.map(preprocess_function, batched=True, remove_columns=remove_columns)
+
+    ### XXX Downsampling no-label background for the training dataset
+    train = processed_datasets["train"]
+
+    type_1: int = train["label_ids"].count([0])
+    type_2: int = train["label_ids"].count([1])
+    min_samples = min(type_1, type_2)
+    print("Min samples for all label combinations: ", min_samples)
+
+    # Instances with no labels.
+    x = [0]
+    y = [1]
+    z = [ ] # Empty list, used for comparisons!
+
+    type_1_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == x]
+    type_2_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == y]
+    background_indices = [i for (i, instance) in enumerate(train) if instance["label_ids"] == z]
+    
+    # Subsample the dominant class
+    background_sample_indices = random.sample(background_indices, min_samples)
+
+    from itertools import chain
+    sample_indices = list(chain(type_1_indices, type_2_indices, background_sample_indices))
+    
+    random.shuffle(sample_indices)
+    
+    assert len(set(sample_indices)) == len(type_1_indices) + len(type_2_indices) + min_samples, \
+        "We should sample only a subset of the background indices!"
+    ###
 
     eval_dataset = processed_datasets["validation"]
 
@@ -254,8 +297,13 @@ def main():
         return batch
 
     if args.num_train_epochs > 0:
+        # train_dataloader = DataLoader(
+        #     train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+        # )
+        ### XXX subsample background sampleswith no labels!
+
         train_dataloader = DataLoader(
-            train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+            train_dataset, sampler=sample_indices, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
         )
     eval_dataloader = DataLoader(eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
 
@@ -343,7 +391,7 @@ def main():
             all_labels = []
             for step, batch in tqdm(enumerate(eval_dataloader)):
                 with torch.no_grad():
-                    outputs = model(**batch)
+                    outputs: SequenceClassifierOutput = model(**batch)
                 preds_raw = outputs.logits.sigmoid().cpu()
                 preds = (preds_raw > 0.5).int()
                 all_preds_raw.extend(list(preds_raw))
@@ -364,7 +412,7 @@ def main():
         all_labels = []
         for step, batch in enumerate(tqdm(eval_dataloader)):
             with torch.no_grad():
-                outputs = model(**batch)
+                outputs: SequenceClassifierOutput = model(**batch)
             preds_raw = outputs.logits.sigmoid().cpu()
             preds = (preds_raw > 0.5).int()
             all_preds_raw.extend(list(preds_raw))
@@ -388,8 +436,8 @@ def main():
         if hasattr(unwrapped_model, "save_pretrained"):
             unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
         else:
+            torch.save(model.state_dict(), CAML_MODEL_PATH)
             print("NotImplemented for the CAML model.")
-
 
 if __name__ == "__main__":
     main()
