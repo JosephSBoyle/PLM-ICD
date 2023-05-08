@@ -101,24 +101,20 @@ def main():
     extension = (args.train_file if args.train_file is not None else args.validation_file).split(".")[-1]
     raw_datasets = load_dataset(extension, data_files=data_files)
     
-    ### XXX Add this back to load all labels
     # Labels
     # A useful fast method:
     # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
-    # labels = set()
+    labels = set()
 
-    # all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
-    # if args.code_file is not None:
-    #     all_codes_file = args.code_file
+    all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
+    if args.code_file is not None:
+        all_codes_file = args.code_file
 
-    # with open(all_codes_file, "r") as f:
-    #     for line in f:
-    #         if line.strip() != "":
-    #             labels.add(line.strip())
-    # label_list = sorted(labels)
-    ###
-
-    label_list = ["250.01", "250.02"] # Diabetes types I and II, respectively.
+    with open(all_codes_file, "r") as f:
+        for line in f:
+            if line.strip() != "":
+                labels.add(line.strip())
+    label_list = sorted(labels)
 
     num_labels = len(label_list)
 
@@ -151,17 +147,6 @@ def main():
             # CAML model isn't a pretrained model.
             model: torch.nn.Module = model_class(config=config)
             
-            ### XXX IF WE'RE LOADING AND FREEZING THE WEIGHTS
-            x = torch.load(CAML_MODEL_PATH)
-            conditioning_weight = torch.Tensor([[1., 0.], # Identity matrix
-                                                [0., 1.]])
-            x["_conditioning.weight"] = conditioning_weight
-            x["_conditioning.bias"]   = torch.zeros([2])
-            model.load_state_dict(x)
-            
-            for name, param in model.named_parameters():
-                param.requires_grad = bool("_conditioning" in name)
-            ###
     else:
         if hasattr(model_class, "from_pretrained"):
             model = model_class.from_pretrained(
@@ -206,12 +191,7 @@ def main():
                     sample_labels = []
                     for label in labels.strip().split(';'):
                         if (stripped_label := label.strip()) != "":
-                            # XXX This line is necessary if we're looking at a subset of labels!
-                            if stripped_label in label_list:
-                                sample_labels.append(label_to_id[stripped_label])
-                            #####
-                    if len(sample_labels) == 2:
-                        breakpoint() # these diabetes codes should be mutually exclusive!
+                            sample_labels.append(label_to_id[stripped_label])
                     label_ids.append(sample_labels)
             ##########################
         
@@ -220,35 +200,6 @@ def main():
 
     remove_columns = raw_datasets["train"].column_names if args.train_file is not None else raw_datasets["validation"].column_names
     processed_datasets = raw_datasets.map(preprocess_function, batched=True, remove_columns=remove_columns)
-
-    ### XXX Downsampling no-label background for the training dataset
-    train = processed_datasets["train"]
-
-    type_1: int = train["label_ids"].count([0])
-    type_2: int = train["label_ids"].count([1])
-    min_samples = min(type_1, type_2)
-    print("Min samples for all label combinations: ", min_samples)
-
-    # Instances with no labels.
-    x = [0]
-    y = [1]
-    z = [ ] # Empty list, used for comparisons!
-
-    type_1_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == x]
-    type_2_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == y]
-    background_indices = [i for (i, instance) in enumerate(train) if instance["label_ids"] == z]
-    
-    # Subsample the dominant class
-    background_sample_indices = random.sample(background_indices, min_samples)
-
-    from itertools import chain
-    sample_indices = list(chain(type_1_indices, type_2_indices, background_sample_indices))
-    
-    random.shuffle(sample_indices)
-    
-    assert len(set(sample_indices)) == len(type_1_indices) + len(type_2_indices) + min_samples, \
-        "We should sample only a subset of the background indices!"
-    ###
 
     eval_dataset = processed_datasets["validation"]
 
@@ -297,14 +248,10 @@ def main():
         return batch
 
     if args.num_train_epochs > 0:
-        # train_dataloader = DataLoader(
-        #     train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
-        # )
-        ### XXX subsample background sampleswith no labels!
-
         train_dataloader = DataLoader(
-            train_dataset, sampler=sample_indices, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+            train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
         )
+
     eval_dataloader = DataLoader(eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
 
     # Optimizer
