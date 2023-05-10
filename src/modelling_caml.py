@@ -3,7 +3,7 @@ from transformers import RobertaModel
 from transformers.modeling_outputs import SequenceClassifierOutput
 
 K = 10
-"""Kernel size. 10 is given as optimal in the CAML paper."""
+"""Kernel (filter) size. 10 is given as optimal in the CAML paper."""
 
 D = 50
 """The number of filter maps. 50 is optimal in the CAML paper."""
@@ -93,6 +93,7 @@ class ConvolutionalAttentionPool(torch.nn.Module):
 
         loss = torch.binary_cross_entropy_with_logits(ŷ2, labels)
         return SequenceClassifierOutput(
-            loss   = loss.sum(),
-            logits = ŷ2,
+            loss       = loss.sum(),
+            logits     = ŷ2,
+            attentions = attention1,
         )

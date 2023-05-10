@@ -35,7 +35,7 @@ from evaluation import all_metrics
 from modeling_bert import BertForMultilabelClassification
 from modeling_longformer import LongformerForMultilabelClassification
 from modeling_roberta import RobertaForMultilabelClassification
-from modelling_caml import ConvolutionalAttentionPool
+from modelling_caml import ConvolutionalAttentionPool, K
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +154,11 @@ def main():
                 config=config,
             )
         else:
-            # CAML model isn't a pretrained model.
             model = model_class(config=config)
+            
+            logger.warning("LOADING PRETRAINED CAML MODEL WEIGHTS FROM %s", CAML_MODEL_PATH)
+            state_dict = torch.load(CAML_MODEL_PATH)
+            model.load_state_dict(state_dict)
 
     sentence1_key, sentence2_key = "TEXT", None
 
@@ -365,6 +368,19 @@ def main():
             all_preds_raw.extend(list(preds_raw))
             all_preds.extend(list(preds))
             all_labels.extend(list(batch["labels"].cpu().numpy()))
+
+            # 
+            # import interpret
+            # # TODO get this shit to work
+            # attentions = outputs.attentions
+            # # batch_size * labels * (tokens + bias)|
+            # vars = {"ind2w": {}, # idx to word maybe??
+            #         "ind2c": {v: k for k, v in label_to_id.items()}, 
+            #         "desc": {}} # Dictionary of code descriptions
+            # interpret.save_samples(data=batch["input_ids"].cpu(), output=preds_raw, target_data=batch["labels"].cpu(),
+            #                        s=attentions.cpu(), filter_size=K,
+            #                        tp_file="./true_positives.txt", fp_file="./false_positives.txt",
+            #                        dicts=vars)
         
         all_preds_raw = np.stack(all_preds_raw)
         all_preds = np.stack(all_preds)
