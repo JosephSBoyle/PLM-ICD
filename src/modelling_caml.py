@@ -38,6 +38,12 @@ class ConvolutionalAttentionPool(torch.nn.Module):
         self._u     = torch.nn.Linear(D, self._num_labels)
         self._final = torch.nn.Linear(D, self._num_labels)
 
+        # XXX delete once done - this isn't part of the normal CAML model.
+        # this gives |L|**2 params to optimize. If L is large, consider adding a smaller,
+        # intermediate layer to reduce this computational cost.
+        # self._conditioning = torch.nn.Linear(self._num_labels, self._num_labels)
+        # torch.nn.init.xavier_uniform_(self._conditioning.weight)
+
         # Initialize the weights of each module.        
         torch.nn.init.xavier_uniform_(self._conv .weight)
         torch.nn.init.xavier_uniform_(self._u    .weight)
@@ -97,3 +103,13 @@ class ConvolutionalAttentionPool(torch.nn.Module):
             logits     = ŷ2,
             attentions = attention1,
         )
+
+        ### XXX Conditioning layer
+        # ŷ3 = self._conditioning(ŷ2)
+        # loss = torch.binary_cross_entropy_with_logits(ŷ3, labels)
+
+        # return SequenceClassifierOutput(
+        #     loss       = loss.sum(),
+        #     logits     = ŷ3,
+        #     attentions = attention1
+        # )

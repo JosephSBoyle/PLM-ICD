@@ -35,7 +35,7 @@ from evaluation import all_metrics
 from modeling_bert import BertForMultilabelClassification
 from modeling_longformer import LongformerForMultilabelClassification
 from modeling_roberta import RobertaForMultilabelClassification
-from modelling_caml import ConvolutionalAttentionPool, K
+from modelling_caml import ConvolutionalAttentionPool
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,7 @@ def main():
     extension = (args.train_file if args.train_file is not None else args.validation_file).split(".")[-1]
     raw_datasets = load_dataset(extension, data_files=data_files)
     
+    ### XXX Add this back to load all labels
     # Labels
     # A useful fast method:
     # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
@@ -115,6 +116,9 @@ def main():
             if line.strip() != "":
                 labels.add(line.strip())
     label_list = sorted(labels)
+    ###
+
+    # label_list = ["250.01", "250.02"] # Diabetes types I and II, respectively.
 
     num_labels = len(label_list)
 
@@ -147,6 +151,24 @@ def main():
             # CAML model isn't a pretrained model.
             model: torch.nn.Module = model_class(config=config)
             
+            ### XXX IF WE'RE LOADING AND FREEZING THE WEIGHTS
+            # x = torch.load(CAML_MODEL_PATH)
+            # logging.info("LOADING MODEL WEIGHTS FROM %s", CAML_MODEL_PATH)
+            
+            # #### XXX IF WE'RE INITIALIZING THE CONDITIONING LAYER AS THE IDENTITY MATRIX
+            # logging.info("CONDITIONING WEIGHTS INITIALIZED TO THE IDENTITY MATRIX")
+            # conditioning_weight = torch.Tensor([[1., 0.], # Identity matrix
+            #                                     [0., 1.]])
+            # x["_conditioning.weight"] = conditioning_weight
+            # x["_conditioning.bias"]   = torch.zeros([2])
+            
+            # # model._conditioning.weight = conditioning_weight
+            # ###
+
+            # model.load_state_dict(x)
+            # for name, param in model.named_parameters():
+            #     param.requires_grad = bool("_conditioning" in name)
+            ###
     else:
         if hasattr(model_class, "from_pretrained"):
             model = model_class.from_pretrained(
@@ -154,11 +176,8 @@ def main():
                 config=config,
             )
         else:
+            # CAML model isn't a pretrained model.
             model = model_class(config=config)
-            
-            logger.warning("LOADING PRETRAINED CAML MODEL WEIGHTS FROM %s", CAML_MODEL_PATH)
-            state_dict = torch.load(CAML_MODEL_PATH)
-            model.load_state_dict(state_dict)
 
     sentence1_key, sentence2_key = "TEXT", None
 
@@ -194,7 +213,12 @@ def main():
                     sample_labels = []
                     for label in labels.strip().split(';'):
                         if (stripped_label := label.strip()) != "":
-                            sample_labels.append(label_to_id[stripped_label])
+                            # XXX This line is necessary if we're looking at a subset of labels!
+                            if stripped_label in label_list:
+                                sample_labels.append(label_to_id[stripped_label])
+                            #####
+                    # if len(sample_labels) == 2:
+                    #     breakpoint() # these diabetes codes should be mutually exclusive!
                     label_ids.append(sample_labels)
             ##########################
         
@@ -203,6 +227,36 @@ def main():
 
     remove_columns = raw_datasets["train"].column_names if args.train_file is not None else raw_datasets["validation"].column_names
     processed_datasets = raw_datasets.map(preprocess_function, batched=True, remove_columns=remove_columns)
+
+    ### XXX Downsampling no-label background for the training dataset
+    # train = processed_datasets["train"]
+
+    # type_1: int = train["label_ids"].count([0])
+    # type_2: int = train["label_ids"].count([1])
+    # min_samples = min(type_1, type_2)
+    # print("Min samples for all label combinations: ", min_samples)
+
+    # # Instances with no labels.
+    # x = [0]
+    # y = [1]
+    # z = [ ] # Empty list, used for comparisons!
+
+    # type_1_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == x]
+    # type_2_indices     = [i for (i, instance) in enumerate(train) if instance["label_ids"] == y]
+    # background_indices = [i for (i, instance) in enumerate(train) if instance["label_ids"] == z]
+    
+    # # Subsample the dominant class
+    # background_sample_indices = random.sample(background_indices, min_samples)
+
+    # from itertools import chain
+    # sample_indices = list(chain(type_1_indices, type_2_indices, background_sample_indices))
+    
+    # random.shuffle(sample_indices)
+    
+    # assert len(set(sample_indices)) == len(type_1_indices) + len(type_2_indices) + min_samples, \
+        # "We should sample only a subset of the background indices!"
+    
+    ###
 
     eval_dataset = processed_datasets["validation"]
 
@@ -254,7 +308,11 @@ def main():
         train_dataloader = DataLoader(
             train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
         )
+        ### XXX subsample background sampleswith no labels!
 
+        # train_dataloader = DataLoader(
+        #     train_dataset, sampler=sample_indices, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+        # )
     eval_dataloader = DataLoader(eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
 
     # Optimizer
@@ -296,10 +354,6 @@ def main():
             num_training_steps=args.max_train_steps,
         )
 
-    # Get the metric function
-    if args.task_name is not None:
-        metric = load_metric("glue", args.task_name)
-
     if args.num_train_epochs > 0:
         # Train!
         total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -315,12 +369,19 @@ def main():
         progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
         completed_steps = 0
 
+        early_stopping_tolerance = 3
+        eval_f1_scores  = [0.0 for _ in range(early_stopping_tolerance)] # Seed with zeros so we can can do indexing
+        train_f1_scores = [0.0 for _ in range(early_stopping_tolerance)] # Seed with zeros so we can can do indexing
         for epoch in tqdm(range(args.num_train_epochs)):
             model.train()
             epoch_loss = 0.0
+
+            all_train_preds = []
+            all_train_preds_raw = []
+            all_train_labels = []
             for step, batch in enumerate(train_dataloader):
-                outputs = model(**batch)
-                loss = outputs.loss
+                outputs_train = model(**batch)
+                loss = outputs_train.loss
                 loss = loss / args.gradient_accumulation_steps
                 accelerator.backward(loss)
                 epoch_loss += loss.item()
@@ -331,9 +392,27 @@ def main():
                     progress_bar.update(1)
                     completed_steps += 1
                     progress_bar.set_postfix(loss=epoch_loss / completed_steps)
-
+                
+                    ### train metrics
+                    train_preds_raw = outputs_train.logits.sigmoid().cpu().detach()
+                    train_preds     = (train_preds_raw > 0.5).int()
+                    
+                    all_train_preds_raw.extend(list(train_preds_raw))
+                    all_train_preds    .extend(list(train_preds))
+                    all_train_labels   .extend(list(batch["labels"].cpu().numpy()))
+                
                 if completed_steps >= args.max_train_steps:
                     break
+                
+            all_train_preds_raw = np.stack(all_train_preds_raw)
+            all_train_preds     = np.stack(all_train_preds)
+            all_train_labels    = np.stack(all_train_labels)
+            
+            train_metrics = all_metrics(yhat=all_train_preds, y=all_train_labels, yhat_raw=all_train_preds_raw)
+            logger.info(f"TRAIN metrics: {train_metrics}")
+
+            train_f1_scores.append(train_metrics["f1_macro"])
+            ###
 
             model.eval()
             all_preds = []
@@ -341,8 +420,8 @@ def main():
             all_labels = []
             for step, batch in tqdm(enumerate(eval_dataloader)):
                 with torch.no_grad():
-                    outputs: SequenceClassifierOutput = model(**batch)
-                preds_raw = outputs.logits.sigmoid().cpu()
+                    outputs_eval: SequenceClassifierOutput = model(**batch)
+                preds_raw = outputs_eval.logits.sigmoid().cpu()
                 preds = (preds_raw > 0.5).int()
                 all_preds_raw.extend(list(preds_raw))
                 all_preds.extend(list(preds))
@@ -354,7 +433,13 @@ def main():
             metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw)
             logger.info(f"epoch {epoch} finished")
             logger.info(f"metrics: {metrics}")
-    
+            
+            eval_f1_scores.append(metrics["f1_macro"])
+            if min(eval_f1_scores[ - early_stopping_tolerance: -1]) > eval_f1_scores[-1]:
+                logging.info("EARLY STOPPING DUE TO f1 DECREASING\n%s", eval_f1_scores)
+                logging.info("EARLY STOPPING TOLERANCE = %s", early_stopping_tolerance)
+                break
+
     if args.num_train_epochs == 0 and accelerator.is_local_main_process:
         model.eval()
         all_preds = []
@@ -362,25 +447,12 @@ def main():
         all_labels = []
         for step, batch in enumerate(tqdm(eval_dataloader)):
             with torch.no_grad():
-                outputs: SequenceClassifierOutput = model(**batch)
-            preds_raw = outputs.logits.sigmoid().cpu()
+                outputs_eval: SequenceClassifierOutput = model(**batch)
+            preds_raw = outputs_eval.logits.sigmoid().cpu()
             preds = (preds_raw > 0.5).int()
             all_preds_raw.extend(list(preds_raw))
             all_preds.extend(list(preds))
             all_labels.extend(list(batch["labels"].cpu().numpy()))
-
-            # 
-            # import interpret
-            # # TODO get this shit to work
-            # attentions = outputs.attentions
-            # # batch_size * labels * (tokens + bias)|
-            # vars = {"ind2w": {}, # idx to word maybe??
-            #         "ind2c": {v: k for k, v in label_to_id.items()}, 
-            #         "desc": {}} # Dictionary of code descriptions
-            # interpret.save_samples(data=batch["input_ids"].cpu(), output=preds_raw, target_data=batch["labels"].cpu(),
-            #                        s=attentions.cpu(), filter_size=K,
-            #                        tp_file="./true_positives.txt", fp_file="./false_positives.txt",
-            #                        dicts=vars)
         
         all_preds_raw = np.stack(all_preds_raw)
         all_preds = np.stack(all_preds)
@@ -399,6 +471,7 @@ def main():
         if hasattr(unwrapped_model, "save_pretrained"):
             unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
         else:
+            breakpoint() # do you want to save?
             torch.save(model.state_dict(), CAML_MODEL_PATH)
             print("NotImplemented for the CAML model.")
 
