@@ -149,21 +149,22 @@ def main():
             )
         else:
             # CAML model isn't a pretrained model.
-            model: torch.nn.Module = model_class(config=config)
+            model: torch.nn.Module = model_class(config=config, conditioning_layer=args.conditioning)
+
+            # if args.conditioning:
+            #     # Initialize the conditioning weight to Identity
+            #     model._conditioning.weight = torch.nn.Parameter(torch.eye(n=num_labels,
+            #                                                               requires_grad=True))
             
             ### XXX IF WE'RE LOADING AND FREEZING THE WEIGHTS
             # x = torch.load(CAML_MODEL_PATH)
             # logging.info("LOADING MODEL WEIGHTS FROM %s", CAML_MODEL_PATH)
             
-            # #### XXX IF WE'RE INITIALIZING THE CONDITIONING LAYER AS THE IDENTITY MATRIX
-            # logging.info("CONDITIONING WEIGHTS INITIALIZED TO THE IDENTITY MATRIX")
-            # conditioning_weight = torch.Tensor([[1., 0.], # Identity matrix
-            #                                     [0., 1.]])
+            # breakpoint()
             # x["_conditioning.weight"] = conditioning_weight
-            # x["_conditioning.bias"]   = torch.zeros([2])
+            # x["_conditioning.bias"]   = torch.zeros([num_labels])
             
-            # # model._conditioning.weight = conditioning_weight
-            # ###
+            # # ###
 
             # model.load_state_dict(x)
             # for name, param in model.named_parameters():
@@ -177,7 +178,7 @@ def main():
             )
         else:
             # CAML model isn't a pretrained model.
-            model = model_class(config=config)
+            model = model_class(config=config, conditioning_layer=args.conditioning)
 
     sentence1_key, sentence2_key = "TEXT", None
 
@@ -254,7 +255,7 @@ def main():
     # random.shuffle(sample_indices)
     
     # assert len(set(sample_indices)) == len(type_1_indices) + len(type_2_indices) + min_samples, \
-        # "We should sample only a subset of the background indices!"
+    #     "We should sample only a subset of the background indices!"
     
     ###
 
@@ -369,7 +370,7 @@ def main():
         progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
         completed_steps = 0
 
-        early_stopping_tolerance = 3
+        early_stopping_tolerance = 5
         eval_f1_scores  = [0.0 for _ in range(early_stopping_tolerance)] # Seed with zeros so we can can do indexing
         train_f1_scores = [0.0 for _ in range(early_stopping_tolerance)] # Seed with zeros so we can can do indexing
         for epoch in tqdm(range(args.num_train_epochs)):
@@ -436,7 +437,7 @@ def main():
             
             eval_f1_scores.append(metrics["f1_macro"])
             if min(eval_f1_scores[ - early_stopping_tolerance: -1]) > eval_f1_scores[-1]:
-                logging.info("EARLY STOPPING DUE TO f1 DECREASING\n%s", eval_f1_scores)
+                logging.info("EARLY STOPPING DUE TO MACRO f1 DECREASING\n%s", eval_f1_scores)
                 logging.info("EARLY STOPPING TOLERANCE = %s", early_stopping_tolerance)
                 break
 
@@ -473,7 +474,8 @@ def main():
         else:
             breakpoint() # do you want to save?
             torch.save(model.state_dict(), CAML_MODEL_PATH)
-            print("NotImplemented for the CAML model.")
+            print(f"CAML MODEL WEIGHTS SAVED TO {CAML_MODEL_PATH}")
+            print(model._conditioning.weight)
 
 if __name__ == "__main__":
     main()

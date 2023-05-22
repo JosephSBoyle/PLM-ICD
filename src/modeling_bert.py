@@ -29,7 +29,7 @@ class BertForMultilabelClassification(BertPreTrainedModel):
         self.num_labels = config.num_labels
         self.model_mode = config.model_mode
 
-        self.bert = BertModel(config)
+        self.bert    = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         if "cls" in self.model_mode:
             self.classifier = nn.Linear(config.hidden_size, config.num_labels)
@@ -44,16 +44,16 @@ class BertForMultilabelClassification(BertPreTrainedModel):
 
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
+        input_ids            = None,
+        attention_mask       = None,
+        token_type_ids       = None,
+        position_ids         = None,
+        head_mask            = None,
+        inputs_embeds        = None,
+        labels               = None,
+        output_attentions    = None,
+        output_hidden_states = None,
+        return_dict          = None,
     ):
         r"""
         input_ids (torch.LongTensor of shape (batch_size, num_chunks, chunk_size))
@@ -64,14 +64,14 @@ class BertForMultilabelClassification(BertPreTrainedModel):
         batch_size, num_chunks, chunk_size = input_ids.size()
         outputs = self.bert(
             input_ids.view(-1, chunk_size),
-            attention_mask=attention_mask.view(-1, chunk_size),
-            token_type_ids=token_type_ids.view(-1, chunk_size),
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            attention_mask       = attention_mask.view(-1, chunk_size),
+            token_type_ids       = token_type_ids.view(-1, chunk_size),
+            position_ids         = position_ids,
+            head_mask            = head_mask,
+            inputs_embeds        = inputs_embeds,
+            output_attentions    = output_attentions,
+            output_hidden_states = output_hidden_states,
+            return_dict          = return_dict,
         )
         
         if "cls" in self.model_mode:
@@ -83,14 +83,14 @@ class BertForMultilabelClassification(BertPreTrainedModel):
             else:
                 raise ValueError(f"model_mode {self.model_mode} not recognized")
             pooled_output = self.dropout(pooled_output)
-            logits = self.classifier(pooled_output)
+            logits        = self.classifier(pooled_output)
         elif "laat" in self.model_mode:
             if self.model_mode == "laat":
                 hidden_output = outputs[0].view(batch_size, num_chunks*chunk_size, -1)
             elif self.model_mode == "laat-split":
                 hidden_output = outputs[0].view(batch_size*num_chunks, chunk_size, -1)
-            weights = torch.tanh(self.first_linear(hidden_output))
-            att_weights = self.second_linear(weights)
+            weights           = torch.tanh(self.first_linear(hidden_output))
+            att_weights       = self.second_linear(weights)
             att_weights = torch.nn.functional.softmax(att_weights, dim=1).transpose(1, 2)
             weighted_output = att_weights @ hidden_output
             logits = self.third_linear.weight.mul(weighted_output).sum(dim=2).add(self.third_linear.bias)
@@ -102,15 +102,15 @@ class BertForMultilabelClassification(BertPreTrainedModel):
         loss = None
         if labels is not None:
             loss_fct = BCEWithLogitsLoss()
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1, self.num_labels))
+            loss     = loss_fct(logits.view(-1, self.num_labels), labels.view(-1, self.num_labels))
 
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return SequenceClassifierOutput(
-            loss=loss,
-            logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            loss          = loss,
+            logits        = logits,
+            hidden_states = outputs.hidden_states,
+            attentions    = outputs.attentions,
         )

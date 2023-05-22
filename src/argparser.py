@@ -119,6 +119,7 @@ def parse_args() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--conditioning", action="store_true", default=False, help="Whether or not to add an inter-label conditioning layer.")
     args = parser.parse_args()
 
     # Sanity checks
