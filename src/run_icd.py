@@ -425,7 +425,28 @@ def main():
             all_preds_raw.extend(list(preds_raw))
             all_preds.extend(list(preds))
             all_labels.extend(list(batch["labels"].cpu().numpy()))
-        
+
+            ### Let's generate some explanations.
+            input_ids  = batch["input_ids"].squeeze(0).flatten() # (512,) - input is chunked into 3 (total seq. length is 512)
+            attentions = outputs_eval.attentions.squeeze(0)      # (8921, 512)
+
+            label_attention = attentions[0]
+
+            from utils.construct_html_of_weights import overlay_sentence_attention
+            # x = []
+            # for id_, attention in zip(input_ids, label_attention):
+            #     x.append(word_overlay(tokenizer.decode(id_), attention))
+            import html
+            tokens = [html.escape(tokenizer.decode(id_)) for id_ in input_ids]
+            
+            normalized_attention = label_attention / max(label_attention)
+            html_output = overlay_sentence_attention(tokens, normalized_attention, name='', true_label="1", prediction=0.5)
+
+            with open("test.html", "w", encoding="utf-8") as f:
+                f.write(html_output)
+
+            ###
+
         all_preds_raw = np.stack(all_preds_raw)
         all_preds = np.stack(all_preds)
         all_labels = np.stack(all_labels)
