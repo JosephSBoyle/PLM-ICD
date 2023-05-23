@@ -3,3 +3,4 @@ venv/*
 *.csv
 models/*
 data/*
+src/outputs/*
