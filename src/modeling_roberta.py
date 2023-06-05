@@ -111,9 +111,10 @@ class RobertaForMultilabelClassification(RobertaPreTrainedModel):
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
+        attention = locals().get("att_weights", None)
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
             hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            attentions=attention,
         )

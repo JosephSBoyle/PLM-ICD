@@ -421,6 +421,12 @@ def main():
         from utils.load_icd9_codes import load_code_descriptions
         code_to_description: dict[str, str] = load_code_descriptions()
 
+        if args.show_attention:
+            import os
+            outputs_dir = "outputs\\"
+            for fp in os.listdir(outputs_dir):
+                os.remove(outputs_dir + fp)
+
         for step, batch in enumerate(tqdm(eval_dataloader)):
             with torch.no_grad():
                 outputs_eval: SequenceClassifierOutput = model(**batch)
@@ -428,17 +434,18 @@ def main():
             preds = (preds_raw > 0.5).int()
             all_preds_raw.extend(list(preds_raw))
             all_preds.extend(list(preds))
-            all_labels.extend(list(batch["labels"].cpu().numpy()))
-
+            batch_labels = batch["labels"].cpu().numpy()
+            all_labels.extend(list(batch_labels))
             if args.show_attention:
                 ### Let's generate some explanations. ###
                 predicted_labels_idxs = np.where(preds[0] == 1)[0]
-                
+                html_output = ""
                 if len(predicted_labels_idxs):
                     for label_idx in predicted_labels_idxs:
                         input_ids  = batch["input_ids"].squeeze(0).flatten() # (512,) - input is chunked into 3 (total seq. length is 512)
                         attentions = outputs_eval.attentions.squeeze(0)      # (8921, 512)
-
+                        sample_labels = batch_labels[0] # NOTE: assuming only one sample in the batch!
+                        
                         label_attention = attentions[label_idx]
 
                         from utils.construct_html_of_weights import overlay_sentence_attention
@@ -447,13 +454,14 @@ def main():
 
                         code = label_list[label_idx]
                         normalized_attention = label_attention / max(label_attention)
-                        html_output = overlay_sentence_attention(tokens, normalized_attention,
+                        html_output += overlay_sentence_attention(tokens, normalized_attention,
                                                                 name='',
-                                                                true_label=label_list[label_idx],
+                                                                true_label="positive" if sample_labels[label_idx] else "negative",
                                                                 prediction=preds_raw[0][label_idx],
                                                                 label_description=code_to_description.get(code, "no description found"))
-                        with open(f"outputs\\{step}_{label_idx}.html", "w", encoding="utf-8") as f:
-                            f.write(html_output)
+
+                    with open(f"{outputs_dir}patient={step}_pred_labels={len(predicted_labels_idxs)}_true_labels={int(sample_labels.sum())}.html", "w", encoding="utf-8") as f:
+                        f.write(html_output)
 
         all_preds_raw = np.stack(all_preds_raw)
         all_preds = np.stack(all_preds)
