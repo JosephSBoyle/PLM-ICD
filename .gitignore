@@ -4,3 +4,4 @@ venv/*
 models/*
 data/*
 src/outputs/*
+*/wandb/*
