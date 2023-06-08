@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import random
 
 import datasets
@@ -15,6 +16,7 @@ from transformers import (AutoConfig, AutoTokenizer, BatchEncoding,
                           get_scheduler, set_seed)
 from transformers.modeling_outputs import SequenceClassifierOutput
 
+import wandb
 from argparser import parse_args
 from evaluation import all_metrics
 from modeling_bert import BertForMultilabelClassification
@@ -32,12 +34,14 @@ MODELS_CLASSES = {
     'caml':       ConvolutionalAttentionPool,
 }
 
-CAML_MODEL_PATH = "../models/caml_base/model_weights.pth"
-
 def main():
     assert torch.cuda.is_available(), "No GPU available!"
 
     args = parse_args()
+    wandb.init(
+        project="PLM-ICD",
+        config=args,
+    )
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -76,16 +80,28 @@ def main():
     # Labels
     # A useful fast method:
     # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
-    labels = set()
 
-    all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
-    if args.code_file is not None:
-        all_codes_file = args.code_file
+    if args.code_50l:
+        # the set of `train_labels` in `collectrare50data` from the KEPT paper repo.
+        # XXX For some reason there are 53 labels lol... whatever I guess.
+        labels = {'747.69', '512.2', '959.7', '710.8', '785.9', '955.3', '34.71', '550.11', '955.1;40.7', 
+                  '447.9', '40.7', 'V18.3', '719.49', '477.8', '506.0', 'V65.3', '53.02', 'V10.61', '148.1',
+                  '780.94', '958.91', '999.82', '252.08', '77.7', '955.1', '701.0', '813.32', '52.0', '816.02',
+                  '998.01', '318.2', '351.9', '171.0', '38.47', '607.82', '990', 'V26.52', '338.28', '378.52',
+                  '17.36', '453.50', '873.52', '176.0', '596.89', '202.82', '569.42', '282.2', '270.6', '737.43',
+                  '790.8', '362.11'}
+        logging.warning("Coding the rarest 50 codes with sufficient data to evaluate on %s", labels)
+    else:
+        labels = set()
+        all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
+        if args.code_file is not None:
+            all_codes_file = args.code_file
 
-    with open(all_codes_file, "r") as f:
-        for line in f:
-            if line.strip() != "":
-                labels.add(line.strip())
+        with open(all_codes_file, "r") as f:
+            for line in f:
+                if line.strip() != "":
+                    labels.add(line.strip())
+    
     label_list = sorted(labels)
     ###
 
@@ -99,7 +115,7 @@ def main():
     # download model & vocab.
     try:
         config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
-    except AttributeError: # CAML model has no 'from_pretrained' attr
+    except (AttributeError, EnvironmentError): # CAML model has no 'from_pretrained' attr. Hugginface has no config for our model (we don't care).
         config = AutoConfig.from_pretrained("roberta-base", num_labels=num_labels, finetuning_task=args.task_name)
     if args.model_type == "longformer":
         config.attention_window = args.chunk_size
@@ -326,8 +342,8 @@ def main():
             num_training_steps=args.max_train_steps,
         )
 
+    # Train!
     if args.num_train_epochs > 0:
-        # Train!
         total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
         logger.info("***** Running training *****")
@@ -407,10 +423,16 @@ def main():
             logger.info(f"metrics: {metrics}")
             
             eval_f1_scores.append(metrics["f1_macro"])
-            if min(eval_f1_scores[ - early_stopping_tolerance: -1]) > eval_f1_scores[-1]:
-                logging.info("EARLY STOPPING DUE TO MACRO f1 DECREASING\n%s", eval_f1_scores)
-                logging.info("EARLY STOPPING TOLERANCE = %s", early_stopping_tolerance)
-                break
+
+            ## Log metrics to weights and biases. Requires a flat dict.
+            joint_metrics_dict = {f"test_{key}" : value for key, value in metrics.items()} \
+                               | {f"train_{key}": value for key, value in train_metrics.items()}
+            wandb.log(joint_metrics_dict)
+            
+            # if min(eval_f1_scores[ - early_stopping_tolerance: -1]) > eval_f1_scores[-1]:
+            #     logging.info("EARLY STOPPING DUE TO MACRO f1 DECREASING\n%s", eval_f1_scores)
+            #     logging.info("EARLY STOPPING TOLERANCE = %s", early_stopping_tolerance)
+            #     break
 
     if args.num_train_epochs == 0 and accelerator.is_local_main_process:
         model.eval()
@@ -422,7 +444,6 @@ def main():
         code_to_description: dict[str, str] = load_code_descriptions()
 
         if args.show_attention:
-            import os
             outputs_dir = "outputs\\"
             for fp in os.listdir(outputs_dir):
                 os.remove(outputs_dir + fp)
@@ -448,8 +469,10 @@ def main():
                         
                         label_attention = attentions[label_idx]
 
-                        from utils.construct_html_of_weights import overlay_sentence_attention
                         import html
+
+                        from utils.construct_html_of_weights import \
+                            overlay_sentence_attention
                         tokens = [html.escape(tokenizer.decode(id_)) for id_ in input_ids]
 
                         code = label_list[label_idx]
@@ -480,10 +503,9 @@ def main():
         if hasattr(unwrapped_model, "save_pretrained"):
             unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
         else:
-            breakpoint() # do you want to save?
-            torch.save(model.state_dict(), CAML_MODEL_PATH)
-            print(f"CAML MODEL WEIGHTS SAVED TO {CAML_MODEL_PATH}")
-            print(model._conditioning.weight)
+            os.makedirs(args.output_dir, exist_ok=True)
+            torch.save(model.state_dict(), args.output_dir + "\\model_weights.pth")
+            print(f"CAML MODEL WEIGHTS SAVED TO {args.output_dir}")
 
 if __name__ == "__main__":
     main()
