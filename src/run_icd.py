@@ -90,6 +90,9 @@ def main():
                   '790.8', '362.11'}
         logging.warning("Coding the rarest 50 codes with sufficient data to evaluate on %s", labels)
     else:
+        if "50l" in args.train_file:
+            logging.warning("WARNING: enable --code_50l to train only on the 50 rarest codes!")
+
         labels = set()
         all_codes_file = "../data/mimic3/ALL_CODES.txt" if not args.code_50 else "../data/mimic3/ALL_CODES_50.txt"
         if args.code_file is not None:
