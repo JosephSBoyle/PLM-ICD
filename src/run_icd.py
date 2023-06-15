@@ -38,10 +38,8 @@ def main():
     assert torch.cuda.is_available(), "No GPU available!"
 
     args = parse_args()
-    wandb.init(
-        project="PLM-ICD",
-        config=args,
-    )
+    wandb.init(project="roberta-icd", config=args,
+               name=args.run_name)
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -114,7 +112,7 @@ def main():
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
     try:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels)
     except (AttributeError, EnvironmentError): # CAML model has no 'from_pretrained' attr. Hugginface has no config for our model (we don't care).
         config = AutoConfig.from_pretrained("roberta-base", num_labels=num_labels, finetuning_task=args.task_name)
     if args.model_type == "longformer":
@@ -305,7 +303,13 @@ def main():
 
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
-    no_decay = ["bias", "LayerNorm.weight"]
+    no_decay = {"bias", "LayerNorm.weight"}
+
+    if args.disable_base_model_weight_decay:
+        assert isinstance(model, RobertaForMultilabelClassification), "base model weight decay only defined for Roberta!"
+        no_decay.update(n for n, _p in model.roberta.named_parameters())
+        logging.warning("Setting RoBERTa weight decay to 0!")
+
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
@@ -313,7 +317,7 @@ def main():
         },
         {
             "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
+            "weight_decay": 0,
         },
     ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
@@ -403,9 +407,9 @@ def main():
             ###
 
             model.eval()
-            all_preds = []
+            all_preds     = []
             all_preds_raw = []
-            all_labels = []
+            all_labels    = []
             for step, batch in tqdm(enumerate(eval_dataloader)):
                 with torch.no_grad():
                     outputs_eval: SequenceClassifierOutput = model(**batch)
@@ -418,17 +422,17 @@ def main():
             all_preds_raw = np.stack(all_preds_raw)
             all_preds = np.stack(all_preds)
             all_labels = np.stack(all_labels)
-            metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw)
+            eval_metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw)
             logger.info(f"epoch {epoch} finished")
-            logger.info(f"metrics: {metrics}")
+            logger.info(f"metrics: {eval_metrics}")
             
-            eval_f1_scores.append(metrics["f1_macro"])
+            eval_f1_scores.append(eval_metrics["f1_macro"])
 
             ## Log metrics to weights and biases. Requires a flat dict.
-            joint_metrics_dict = {f"test_{key}" : value for key, value in metrics.items()} \
-                               | {f"train_{key}": value for key, value in train_metrics.items()}
+            joint_metrics_dict = {f"eval_{key}": value for key, value in eval_metrics.items()} \
+                               | {f"train_{key}": value for key, value in train_metrics.items()} \
+                               | {"eval_loss": outputs_eval.loss, "train_loss": epoch_loss}
             wandb.log(joint_metrics_dict)
-            
             # if min(eval_f1_scores[ - early_stopping_tolerance: -1]) > eval_f1_scores[-1]:
             #     logging.info("EARLY STOPPING DUE TO MACRO f1 DECREASING\n%s", eval_f1_scores)
             #     logging.info("EARLY STOPPING TOLERANCE = %s", early_stopping_tolerance)
@@ -489,13 +493,16 @@ def main():
         all_preds_raw = np.stack(all_preds_raw)
         all_preds = np.stack(all_preds)
         all_labels = np.stack(all_labels)
-        metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw)
+        eval_metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw)
+
         logger.info(f"evaluation finished")
-        logger.info(f"metrics: {metrics}")
+        logger.info(f"metrics: {eval_metrics}")
+        wandb.log(eval_metrics)
+
         for t in [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]:
             all_preds = (all_preds_raw > t).astype(int)
-            metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw, k=[5,8,15])
-            logger.info(f"metrics for threshold {t}: {metrics}")
+            eval_metrics = all_metrics(yhat=all_preds, y=all_labels, yhat_raw=all_preds_raw, k=[5,8,15])
+            logger.info(f"metrics for threshold {t}: {eval_metrics}")
 
     if args.output_dir is not None and args.num_train_epochs > 0:
         accelerator.wait_for_everyone()

@@ -6,10 +6,10 @@ def parse_args() -> argparse.ArgumentParser:
     """Parse the CLI arguments"""
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a text classification task")
     parser.add_argument(
-        "--task_name",
+        "--run_name",
         type=str,
         default=None,
-        help="The name of the glue task to train on.",
+        help="The name of the run.",
     )
     parser.add_argument(
         "--train_file", type=str, default=None, help="A csv or a json file containing the training data."
@@ -91,6 +91,8 @@ def parse_args() -> argparse.ArgumentParser:
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
+    parser.add_argument("--disable_base_model_weight_decay", action="store_true", help="Whether or not to decay weights for the base model. \
+                        WARNING: only implemented for RoBERTa thus far!")
     parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--max_train_steps",
@@ -127,8 +129,8 @@ def parse_args() -> argparse.ArgumentParser:
     args = parser.parse_args()
 
     # Sanity checks
-    if args.task_name is None and args.train_file is None and args.validation_file is None:
-        raise ValueError("Need either a task name or a training/validation file.")
+    if args.train_file is None and args.validation_file is None:
+        raise ValueError("Need a training/validation file.")
     else:
         if args.train_file is not None:
             extension = args.train_file.split(".")[-1]
