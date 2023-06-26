@@ -38,8 +38,6 @@ def main():
     assert torch.cuda.is_available(), "No GPU available!"
 
     args = parse_args()
-    wandb.init(project="roberta-icd", config=args,
-               name=args.run_name)
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -117,7 +115,7 @@ def main():
     try:
         config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels)
     except (AttributeError, EnvironmentError): # CAML model has no 'from_pretrained' attr. Hugginface has no config for our model (we don't care).
-        config = AutoConfig.from_pretrained("roberta-base", num_labels=num_labels, finetuning_task=args.task_name)
+        config = AutoConfig.from_pretrained("roberta-base", num_labels=num_labels, finetuning_task=None)
     if args.model_type == "longformer":
         config.attention_window = args.chunk_size
     elif args.model_type in ["bert", "roberta"]:
@@ -350,6 +348,9 @@ def main():
         )
 
     # Train!
+    wandb.init(project="CAML-per-label-labelsmoothing", config=args,
+               name=args.run_name)
+
     if args.num_train_epochs > 0:
         total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 

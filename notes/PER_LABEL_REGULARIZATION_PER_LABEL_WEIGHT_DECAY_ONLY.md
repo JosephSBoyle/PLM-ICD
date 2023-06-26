@@ -1,0 +1,16 @@
+python run_icd.py \
+    --train_file ../data/mimic3/train_50.csv \
+    --validation_file ../data/mimic3/test_50.csv \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/RoBERTa-base-PM-M3-Voc-distill-align-hf \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 20 \
+    --num_warmup_steps 2000 \
+    --output_dir ../models/roberta_weight_decay_000005 \
+    --model_type roberta \
+    --model_mode laat \
+    --weight_decay 0.00001 \
+    --disable_weight_decay_base_model \

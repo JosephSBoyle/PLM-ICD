@@ -1,0 +1,27 @@
+python run_icd.py \
+    --run_name caml_no_labelsmoothing \
+    --train_file ../data/mimic3/train_full.csv \
+    --validation_file ../data/mimic3/dev_full.csv \
+    --max_length 2500 \
+    --chunk_size 2500 \
+    --model_name_or_path caml_label_smoothing \
+    --num_train_epochs 1 \
+    --output_dir ../models/caml_label_smoothing \
+    --model_type caml \
+    --model_mode laat \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 16 && \
+python run_icd.py \
+    --run_name caml_0_1_labelsmoothing \
+    --train_file ../data/mimic3/train_full.csv \
+    --validation_file ../data/mimic3/dev_full.csv \
+    --max_length 2500 \
+    --chunk_size 2500 \
+    --model_name_or_path caml_0_1_labelsmoothing \
+    --num_train_epochs 1 \
+    --output_dir ../models/caml_0_1_labelsmoothing \
+    --model_type caml \
+    --model_mode laat \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 16 \
+    --label_smoothing 0.1

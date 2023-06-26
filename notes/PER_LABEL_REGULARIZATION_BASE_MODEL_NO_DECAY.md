@@ -1,0 +1,84 @@
+python run_icd.py \
+    --run_name base_model_no_decay_0001 \
+    --train_file ../data/mimic3/train_50l.csv \
+    --validation_file ../data/mimic3/test_50l.csv \
+    --code_50l \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/RoBERTa-base-PM-M3-Voc-distill-align-hf \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 20 \
+    --num_warmup_steps 2000 \
+    --output_dir ../models/roberta_weight_decay_0001_no_base_model_decay \
+    --model_type roberta \
+    --model_mode laat \
+    --weight_decay 0.001 \
+    --disable_base_model_weight_decay && \
+python run_icd.py \
+    --run_name base_model_decay_0001 \
+    --train_file ../data/mimic3/train_50l.csv \
+    --validation_file ../data/mimic3/test_50l.csv \
+    --code_50l \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/RoBERTa-base-PM-M3-Voc-distill-align-hf \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 20 \
+    --num_warmup_steps 2000 \
+    --output_dir ../models/roberta_weight_decay_0001 \
+    --model_type roberta \
+    --model_mode laat \
+    --weight_decay 0.001 && \
+python run_icd.py \
+    --run_name no_weight_decay \
+    --train_file ../data/mimic3/train_50l.csv \
+    --validation_file ../data/mimic3/test_50l.csv \
+    --code_50l \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/RoBERTa-base-PM-M3-Voc-distill-align-hf \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 20 \
+    --num_warmup_steps 2000 \
+    --output_dir ../models/roberta_no_weight_decay \
+    --model_type roberta \
+    --model_mode laat
+
+### EVALUATE the models on the test file
+python run_icd.py \
+    --run_name TEST_SET_base_model_no_decay_0001 \
+    --train_file ../data/mimic3/train_50l.csv \
+    --validation_file ../data/mimic3/test_50l.csv \
+    --code_50l \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/roberta_weight_decay_0001_no_base_model_decay \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 0 \
+    --model_type roberta \
+    --model_mode laat \
+    --weight_decay 0.001 \
+    --disable_base_model_weight_decay && \
+python run_icd.py \
+    --run_name TEST_SET_base_model_decay_0001 \
+    --train_file ../data/mimic3/train_50l.csv \
+    --validation_file ../data/mimic3/test_50l.csv \
+    --code_50l \
+    --max_length 3072 \
+    --chunk_size 128 \
+    --model_name_or_path ../models/roberta_weight_decay_0001 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --per_device_eval_batch_size 1 \
+    --num_train_epochs 0 \
+    --model_type roberta \
+    --model_mode laat \
+    --weight_decay 0.001

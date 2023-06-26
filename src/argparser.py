@@ -91,6 +91,7 @@ def parse_args() -> argparse.ArgumentParser:
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
+    parser.add_argument("--label_smoothing", type=float, default=None, help="How much to smooth the output targets (y) by.")
     parser.add_argument("--disable_base_model_weight_decay", action="store_true", help="Whether or not to decay weights for the base model. \
                         WARNING: only implemented for RoBERTa thus far!")
     parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")

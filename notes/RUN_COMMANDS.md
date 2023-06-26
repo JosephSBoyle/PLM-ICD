@@ -57,8 +57,8 @@ you get some weird pytorch error in the backend!
 python run_icd.py \
     --train_file ../data/mimic3/train_full.csv \
     --validation_file ../data/mimic3/test_full.csv \
-    --max_length 250 \
-    --chunk_size 250 \
+    --max_length 2500 \
+    --chunk_size 2500 \
     --model_name_or_path ../models/roberta-mimic3-full \
     --num_train_epochs 1 \
     --output_dir ../models/roberta-mimic3-full \
@@ -71,10 +71,12 @@ python run_icd.py \
     --max_length 2500 \
     --chunk_size 2500 \
     --model_name_or_path ../models/roberta-mimic3-full \
-    --num_train_epochs 1 \
+    --num_train_epochs 10 \
     --output_dir ../models/roberta-mimic3-full \
     --model_type caml \
-    --model_mode laat
+    --model_mode laat \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 16 \
 
 
 python run_icd.py \

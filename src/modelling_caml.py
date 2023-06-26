@@ -1,3 +1,4 @@
+import logging
 import torch
 from transformers import RobertaModel
 from transformers.modeling_outputs import SequenceClassifierOutput
@@ -9,7 +10,7 @@ D = 50
 """The number of filter maps. 50 is optimal in the CAML paper."""
 
 class ConvolutionalAttentionPool(torch.nn.Module):
-    def __init__(self, config, conditioning_layer : bool = False):
+    def __init__(self, config, conditioning_layer : bool = False, label_smoothing : float = 0.0):
         super().__init__()
 
         ### HACK: use a bert model to get our embedding matrix.
@@ -57,6 +58,10 @@ class ConvolutionalAttentionPool(torch.nn.Module):
         torch.nn.init.xavier_uniform_(self._conv .weight)
         torch.nn.init.xavier_uniform_(self._u    .weight)
         torch.nn.init.xavier_uniform_(self._final.weight)
+
+        if label_smoothing:
+            logging.warning("TRAINING WITH LABEL SMOOTHING: %s!", label_smoothing)
+        self._loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     def forward(
         self,
@@ -115,7 +120,7 @@ class ConvolutionalAttentionPool(torch.nn.Module):
         else:
             ŷ3 = ŷ2
 
-        loss = torch.binary_cross_entropy_with_logits(ŷ3, labels)
+        loss = self._loss_fn(ŷ3, labels)
         return SequenceClassifierOutput(
             loss       = loss.sum(),
             logits     = ŷ2,
