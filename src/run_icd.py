@@ -1,4 +1,4 @@
-import logging
+import logging; logger = logging.getLogger(__name__)
 import math
 import os
 import random
@@ -23,8 +23,6 @@ from modeling_bert import BertForMultilabelClassification
 from modeling_longformer import LongformerForMultilabelClassification
 from modeling_roberta import RobertaForMultilabelClassification
 from modelling_caml import ConvolutionalAttentionPool
-
-logger = logging.getLogger(__name__)
 
 
 MODELS_CLASSES = {
@@ -100,8 +98,13 @@ def main():
             for line in f:
                 if line.strip() != "":
                     labels.add(line.strip())
-    
+
     label_list = sorted(labels)
+
+    if args.only_labels_in_train_set:
+        logger.warning("ONLY USING LABELS IN THE TRAINING SET!!!")
+        train_labels = set(';'.join(raw_datasets["train"]["LABELS"]).split(";")) # I'm either a genius or a ...
+        label_list = [l for l in label_list if l in train_labels]
     ###
 
     # label_list = ["250.01", "250.02"] # Diabetes types I and II, respectively.

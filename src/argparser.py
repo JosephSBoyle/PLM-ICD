@@ -127,6 +127,7 @@ def parse_args() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument("--conditioning", action="store_true", default=False, help="Whether or not to add an inter-label conditioning layer.")
     parser.add_argument("--show_attention", action="store_true", default=False, help="Whether or not to generate heatmaps of the per-label attention over the input.")
+    parser.add_argument("--only_labels_in_train_set", action="store_true", default=False, help="whether to ONLY model labels seen in the training set")
     args = parser.parse_args()
 
     # Sanity checks
